@@ -26,8 +26,21 @@ const app = express();
 
 // Security
 app.use(helmet());
+
+// CORS — allow Vercel frontend + local dev
+const allowedOrigins = [
+  process.env.FRONTEND_URL,          // set on Render: https://yourapp.vercel.app
+  'http://localhost:5173',
+  'http://localhost:3000',
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // allow requests with no origin (mobile apps, curl, Render health checks)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -80,8 +93,9 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
+// Render assigns PORT dynamically; always bind to 0.0.0.0
 const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`🚀 Spreetail API running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
 });
 
