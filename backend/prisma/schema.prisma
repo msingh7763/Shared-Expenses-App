@@ -1,0 +1,197 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
+  avatarUrl    String?  @map("avatar_url")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  groupMemberships GroupMember[]
+  expensesPaid     Expense[]       @relation("ExpensePaidBy")
+  expenseSplits    ExpenseSplit[]
+  settlementsFrom  Settlement[]    @relation("SettlementFrom")
+  settlementsTo    Settlement[]    @relation("SettlementTo")
+
+  @@map("users")
+}
+
+model Group {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members     GroupMember[]
+  expenses    Expense[]
+  settlements Settlement[]
+  importJobs  ImportJob[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id       String    @id @default(uuid())
+  groupId  String    @map("group_id")
+  userId   String    @map("user_id")
+  role     String    @default("member")
+  joinedAt DateTime  @map("joined_at")
+  leftAt   DateTime? @map("left_at")
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId, joinedAt])
+  @@map("group_members")
+}
+
+enum SplitType {
+  EQUAL
+  UNEQUAL
+  PERCENTAGE
+  SHARE
+}
+
+enum Currency {
+  INR
+  USD
+}
+
+model Expense {
+  id             String    @id @default(uuid())
+  groupId        String    @map("group_id")
+  paidById       String?   @map("paid_by_id")
+  paidByName     String?   @map("paid_by_name")
+  description    String
+  amount         Decimal   @db.Decimal(15, 4)
+  currency       Currency
+  amountInr      Decimal?  @db.Decimal(15, 4) @map("amount_inr")
+  conversionRate Decimal?  @db.Decimal(10, 4) @map("conversion_rate")
+  splitType      SplitType @map("split_type")
+  expenseDate    DateTime  @map("expense_date")
+  notes          String?
+  isSettlement   Boolean   @default(false) @map("is_settlement")
+  importedFrom   String?   @map("imported_from")
+  importJobId    String?   @map("import_job_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  group     Group          @relation(fields: [groupId], references: [id])
+  paidBy    User?          @relation("ExpensePaidBy", fields: [paidById], references: [id])
+  splits    ExpenseSplit[]
+  importJob ImportJob?     @relation(fields: [importJobId], references: [id])
+
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id         String   @id @default(uuid())
+  expenseId  String   @map("expense_id")
+  userId     String?  @map("user_id")
+  userName   String?  @map("user_name")
+  amount     Decimal  @db.Decimal(15, 4)
+  percentage Decimal? @db.Decimal(7, 4)
+  shareUnits Int?     @map("share_units")
+  currency   Currency
+  amountInr  Decimal? @db.Decimal(15, 4) @map("amount_inr")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id])
+
+  @@map("expense_splits")
+}
+
+model Settlement {
+  id          String   @id @default(uuid())
+  groupId     String   @map("group_id")
+  fromUserId  String   @map("from_user_id")
+  toUserId    String   @map("to_user_id")
+  amount      Decimal  @db.Decimal(15, 4)
+  currency    Currency
+  amountInr   Decimal? @db.Decimal(15, 4) @map("amount_inr")
+  settledAt   DateTime @map("settled_at")
+  notes       String?
+  importJobId String?  @map("import_job_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  group    Group @relation(fields: [groupId], references: [id])
+  fromUser User  @relation("SettlementFrom", fields: [fromUserId], references: [id])
+  toUser   User  @relation("SettlementTo", fields: [toUserId], references: [id])
+
+  @@map("settlements")
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  AWAITING_REVIEW
+  COMPLETED
+  FAILED
+}
+
+model ImportJob {
+  id           String       @id @default(uuid())
+  groupId      String       @map("group_id")
+  filename     String
+  status       ImportStatus @default(PENDING)
+  totalRows    Int          @default(0) @map("total_rows")
+  importedRows Int          @default(0) @map("imported_rows")
+  skippedRows  Int          @default(0) @map("skipped_rows")
+  errorRows    Int          @default(0) @map("error_rows")
+  report       Json?
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  group     Group           @relation(fields: [groupId], references: [id])
+  anomalies ImportAnomaly[]
+  expenses  Expense[]
+
+  @@map("import_jobs")
+}
+
+enum AnomalySeverity {
+  ERROR
+  WARNING
+  INFO
+}
+
+enum AnomalyStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AUTO_RESOLVED
+}
+
+model ImportAnomaly {
+  id          String          @id @default(uuid())
+  importJobId String          @map("import_job_id")
+  rowNumber   Int             @map("row_number")
+  rowData     Json            @map("row_data")
+  anomalyType String          @map("anomaly_type")
+  severity    AnomalySeverity
+  description String
+  suggestion  String
+  status      AnomalyStatus   @default(PENDING)
+  resolvedBy  String?         @map("resolved_by")
+  resolvedAt  DateTime?       @map("resolved_at")
+  actionTaken String?         @map("action_taken")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@map("import_anomalies")
+}
